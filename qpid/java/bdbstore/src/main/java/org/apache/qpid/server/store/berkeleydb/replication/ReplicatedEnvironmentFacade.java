@@ -163,13 +163,13 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
     private final AtomicReference<ReplicationGroupListener> _replicationGroupListener = new AtomicReference<ReplicationGroupListener>();
     private final AtomicReference<StateChangeListener> _stateChangeListener = new AtomicReference<StateChangeListener>();
     private final Durability _defaultDurability;
-    private final AtomicReference<Durability> _messageStoreDurability = new AtomicReference<Durability>();
 
     private volatile Durability _realMessageStoreDurability = null;
     private volatile CoalescingCommiter _coalescingCommiter = null;
     private volatile ReplicatedEnvironment _environment;
     private volatile long _joinTime;
     private volatile ReplicatedEnvironment.State _lastKnownEnvironmentState;
+    private volatile Durability _messageStoreDurability;
 
     private final ConcurrentHashMap<String, Database> _cachedDatabases = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<DatabaseEntry, Sequence> _cachedSequences = new ConcurrentHashMap<>();
@@ -208,7 +208,7 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
     @Override
     public Transaction beginTransaction()
     {
-        if (_messageStoreDurability.get() == null)
+        if (_messageStoreDurability == null)
         {
             throw new IllegalStateException("Message store durability is not set");
         }
@@ -240,7 +240,7 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
         }
 
         if (_coalescingCommiter != null && _realMessageStoreDurability.getLocalSync() == SyncPolicy.NO_SYNC
-                && _messageStoreDurability.get().getLocalSync() == SyncPolicy.SYNC)
+                && _messageStoreDurability.getLocalSync() == SyncPolicy.SYNC)
         {
             return _coalescingCommiter.commit(tx, syncCommit);
         }
@@ -306,7 +306,18 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
     @Override
     public DatabaseException handleDatabaseException(String contextMessage, final DatabaseException dbe)
     {
-        boolean restart = (dbe instanceof InsufficientReplicasException || dbe instanceof InsufficientAcksException || dbe instanceof RestartRequiredException);
+        boolean noMajority = dbe instanceof InsufficientReplicasException || dbe instanceof InsufficientAcksException;
+
+        if (noMajority)
+        {
+            ReplicationGroupListener listener = _replicationGroupListener.get();
+            if (listener != null)
+            {
+                listener.onNoMajority();
+            }
+        }
+
+        boolean restart = (noMajority || dbe instanceof RestartRequiredException);
         if (restart)
         {
             tryToRestartEnvironment(dbe);
@@ -534,7 +545,7 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
 
     public Durability getMessageStoreDurability()
     {
-        return _messageStoreDurability.get();
+        return _messageStoreDurability;
     }
 
     public boolean isCoalescingSync()
@@ -951,7 +962,6 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
         {
             connectToHelperNodeAndCheckPermittedHosts(helperNodeName, helperHostPort, hostPort);
         }
-
         Map<String, String> replicationEnvironmentParameters = new HashMap<>(ReplicatedEnvironmentFacade.REPCONFIG_DEFAULTS);
         replicationEnvironmentParameters.putAll(_configuration.getReplicationParameters());
 
@@ -1095,10 +1105,24 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
         }
     }
 
+    /**
+     * This method should only be invoked from configuration thread on virtual host activation.
+     * Otherwise, invocation of this method whilst coalescing committer is committing transactions might result in transaction aborts.
+     */
     public void setMessageStoreDurability(SyncPolicy localTransactionSynchronizationPolicy, SyncPolicy remoteTransactionSynchronizationPolicy, ReplicaAckPolicy replicaAcknowledgmentPolicy)
     {
-        if (_messageStoreDurability.compareAndSet(null, new Durability(localTransactionSynchronizationPolicy, remoteTransactionSynchronizationPolicy, replicaAcknowledgmentPolicy )))
+        if (_messageStoreDurability == null || localTransactionSynchronizationPolicy != _messageStoreDurability.getLocalSync()
+                || remoteTransactionSynchronizationPolicy != _messageStoreDurability.getReplicaSync()
+                || replicaAcknowledgmentPolicy != _messageStoreDurability.getReplicaAck())
         {
+            _messageStoreDurability = new Durability(localTransactionSynchronizationPolicy, remoteTransactionSynchronizationPolicy, replicaAcknowledgmentPolicy);
+
+            if (_coalescingCommiter != null)
+            {
+                _coalescingCommiter.stop();
+                _coalescingCommiter = null;
+            }
+
             if (localTransactionSynchronizationPolicy == LOCAL_TRANSACTION_SYNCHRONIZATION_POLICY)
             {
                 localTransactionSynchronizationPolicy = SyncPolicy.NO_SYNC;
@@ -1106,10 +1130,6 @@ public class ReplicatedEnvironmentFacade implements EnvironmentFacade, StateChan
                 _coalescingCommiter.start();
             }
             _realMessageStoreDurability = new Durability(localTransactionSynchronizationPolicy, remoteTransactionSynchronizationPolicy, replicaAcknowledgmentPolicy);
-        }
-        else
-        {
-            throw new IllegalStateException("Message store durability is already set to " + _messageStoreDurability.get());
         }
     }
 

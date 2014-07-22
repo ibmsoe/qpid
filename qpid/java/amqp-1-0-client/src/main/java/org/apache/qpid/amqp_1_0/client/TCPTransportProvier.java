@@ -20,24 +20,31 @@
  */
 package org.apache.qpid.amqp_1_0.client;
 
-import org.apache.qpid.amqp_1_0.framing.ConnectionHandler;
-import org.apache.qpid.amqp_1_0.framing.ExceptionHandler;
-import org.apache.qpid.amqp_1_0.transport.ConnectionEndpoint;
-import org.apache.qpid.amqp_1_0.type.FrameBody;
-import org.apache.qpid.amqp_1_0.type.SaslFrameBody;
-
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLSocket;
-import javax.net.ssl.SSLSocketFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+
+import org.apache.qpid.amqp_1_0.framing.ConnectionHandler;
+import org.apache.qpid.amqp_1_0.framing.ExceptionHandler;
+import org.apache.qpid.amqp_1_0.transport.ConnectionEndpoint;
+import org.apache.qpid.amqp_1_0.type.FrameBody;
+import org.apache.qpid.amqp_1_0.type.SaslFrameBody;
 
 class TCPTransportProvier implements TransportProvider
 {
+    private static final Logger RAW_LOGGER = Logger.getLogger("RAW");
+
+    private Socket _socket;
     private final String _transport;
     
     // Defines read socket timeout in milliseconds.  A value of 0 means that the socket
@@ -48,6 +55,7 @@ class TCPTransportProvier implements TransportProvider
     // the event of a SocketTimeoutException.  A value of -1L will disable idle read timeout checking.
     // Default value is set to -1L, which means disable idle read checks.
     private long _readIdleTimeout = Long.getLong("qpid.connection_read_idle_timeout", -1L);
+    private final AtomicLong _threadNameIndex = new AtomicLong();
 
     public TCPTransportProvier(final String transport)
     {
@@ -63,23 +71,23 @@ class TCPTransportProvier implements TransportProvider
     {
         try
         {
-            final Socket s;
             if(sslContext != null)
             {
                 final SSLSocketFactory socketFactory = sslContext.getSocketFactory();
 
                 SSLSocket sslSocket = (SSLSocket) socketFactory.createSocket(address, port);
 
-                s=sslSocket;
+                conn.setExternalPrincipal(sslSocket.getSession().getLocalPrincipal());
+                _socket=sslSocket;
             }
             else
             {
-                s = new Socket(address, port);
+                _socket = new Socket(address, port);
             }
             // set socket read timeout
-            s.setSoTimeout(_readTimeout);
+            _socket.setSoTimeout(_readTimeout);
 
-            conn.setRemoteAddress(s.getRemoteSocketAddress());
+            conn.setRemoteAddress(_socket.getRemoteSocketAddress());
 
             ConnectionHandler.FrameOutput<FrameBody> out = new ConnectionHandler.FrameOutput<FrameBody>(conn);
 
@@ -97,7 +105,7 @@ class TCPTransportProvier implements TransportProvider
                                                                                                            (byte)1,
                                                                                                            (byte)0,
                                                                                                            (byte)0),
-                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(saslOut,conn.getDescribedTypeRegistry()),
+                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(saslOut.asFrameSource(),conn.getDescribedTypeRegistry()),
                                                                    new ConnectionHandler.HeaderBytesSource(conn, (byte)'A',
                                                                                                            (byte)'M',
                                                                                                            (byte)'Q',
@@ -106,7 +114,7 @@ class TCPTransportProvier implements TransportProvider
                                                                                                            (byte)1,
                                                                                                            (byte)0,
                                                                                                            (byte)0),
-                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(out,conn.getDescribedTypeRegistry())
+                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(out.asFrameSource(),conn.getDescribedTypeRegistry())
                 );
 
                 conn.setSaslFrameOutput(saslOut);
@@ -121,22 +129,24 @@ class TCPTransportProvier implements TransportProvider
                                                                                                            (byte)1,
                                                                                                            (byte)0,
                                                                                                            (byte)0),
-                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(out,conn.getDescribedTypeRegistry())
+                                                                   new ConnectionHandler.FrameToBytesSourceAdapter(out.asFrameSource(),conn.getDescribedTypeRegistry())
                 );
             }
 
 
-            final OutputStream outputStream = s.getOutputStream();
+            final OutputStream outputStream = _socket.getOutputStream();
             ConnectionHandler.BytesOutputHandler outputHandler =
                     new ConnectionHandler.BytesOutputHandler(outputStream, src, conn, exceptionHandler);
-            Thread outputThread = new Thread(outputHandler);
+            long threadIndex = _threadNameIndex.getAndIncrement();
+            Thread outputThread = new Thread(outputHandler, "QpidConnectionOutputThread-"+threadIndex);
+
             outputThread.setDaemon(true);
             outputThread.start();
             conn.setFrameOutputHandler(out);
 
 
             final ConnectionHandler handler = new ConnectionHandler(conn);
-            final InputStream inputStream = s.getInputStream();
+            final InputStream inputStream = _socket.getInputStream();
 
             Thread inputThread = new Thread(new Runnable()
             {
@@ -151,21 +161,11 @@ class TCPTransportProvier implements TransportProvider
                     {
                         if(conn.closedForInput() && conn.closedForOutput())
                         {
-                            try
-                            {
-                                synchronized (outputStream)
-                                {
-                                    s.close();
-                                }
-                            }
-                            catch (IOException e)
-                            {
-                                e.printStackTrace();  //To change body of catch statement use File | Settings | File Templates.
-                            }
+                            close();
                         }
                     }
                 }
-            });
+            },"QpidConnectionInputThread-"+threadIndex);
 
             inputThread.setDaemon(true);
             inputThread.start();
@@ -176,6 +176,20 @@ class TCPTransportProvier implements TransportProvider
             throw new ConnectionException(e);
         }
     }
+
+    @Override
+    public void close()
+    {
+        try
+        {
+            _socket.close();
+        }
+        catch (IOException e)
+        {
+            RAW_LOGGER.log(Level.WARNING, "Unexpected Error during TCPTransportProvider socket close", e);
+        }
+    }
+
     private void doRead(final ConnectionEndpoint conn, final ConnectionHandler handler, final InputStream inputStream)
     {
         byte[] buf = new byte[2<<15];

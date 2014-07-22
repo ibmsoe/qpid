@@ -237,14 +237,6 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
             _childrenByName.put(childClass, new ConcurrentHashMap<String, ConfiguredObject<?>>());
         }
 
-        for(ConfiguredObject<?> parent : parents.values())
-        {
-            if(parent instanceof AbstractConfiguredObject<?>)
-            {
-                ((AbstractConfiguredObject<?>)parent).registerChild(this);
-            }
-        }
-
         for(Map.Entry<Class<? extends ConfiguredObject>, ConfiguredObject<?>> entry : parents.entrySet())
         {
             addParent((Class<ConfiguredObject<?>>) entry.getKey(), entry.getValue());
@@ -405,6 +397,17 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
         }
     }
 
+    public void registerWithParents()
+    {
+        for(ConfiguredObject<?> parent : _parents.values())
+        {
+            if(parent instanceof AbstractConfiguredObject<?>)
+            {
+                ((AbstractConfiguredObject<?>)parent).registerChild(this);
+            }
+        }
+    }
+
     protected void closeChildren()
     {
         applyToChildren(new Action<ConfiguredObject<?>>()
@@ -453,6 +456,7 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
     {
         if(_dynamicState.compareAndSet(DynamicState.UNINIT, DynamicState.OPENED))
         {
+            registerWithParents();
             final AuthenticatedPrincipal currentUser = SecurityManager.getCurrentUser();
             if(currentUser != null)
             {
@@ -1357,6 +1361,7 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
         Map<String,String> inheritedContext = new HashMap<String, String>();
         generateInheritedContext(object.getModel(), object, inheritedContext);
         return Strings.expand(value, false,
+                              JSON_SUBSTITUTION_RESOLVER,
                               getOwnAttributeResolver(object),
                               new Strings.MapResolver(inheritedContext),
                               Strings.JAVA_SYS_PROPS_RESOLVER,
@@ -1390,6 +1395,16 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
         }
     }
 
+
+    private static final Strings.Resolver JSON_SUBSTITUTION_RESOLVER =
+            Strings.createSubstitutionResolver("json:",
+                                               new LinkedHashMap<String, String>()
+                                               {
+                                                   {
+                                                       put("\\","\\\\");
+                                                       put("\"","\\\"");
+                                                   }
+                                               });
 
     private static class OwnAttributeResolver implements Strings.Resolver
     {
@@ -1428,7 +1443,7 @@ public abstract class AbstractConfiguredObject<X extends ConfiguredObject<X>> im
         }
 
         @Override
-        public String resolve(final String variable)
+        public String resolve(final String variable, final Strings.Resolver resolver)
         {
             boolean clearStack = false;
             Set<String> currentStack = _stack.get();

@@ -21,6 +21,7 @@
 
 
 #include "qpid/Exception.h"
+#include "qpid/broker/BrokerImportExport.h"
 #include <boost/shared_ptr.hpp>
 #include <iostream>
 #include <map>
@@ -48,6 +49,7 @@ namespace acl {
         OBJ_LINK,
         OBJ_METHOD,
         OBJ_QUERY,
+        OBJ_CONNECTION,
         OBJECTSIZE }; // OBJECTSIZE must be last in list
 
     // Action  shared between ACL spec and ACL authorise interface
@@ -82,6 +84,7 @@ namespace acl {
         PROP_SCHEMACLASS,
         PROP_POLICYTYPE,
         PROP_PAGING,
+        PROP_HOST,
         PROP_MAXPAGES,
         PROP_MAXPAGEFACTOR,
         PROP_MAXQUEUESIZE,
@@ -109,6 +112,7 @@ namespace acl {
         SPECPROP_SCHEMACLASS     = PROP_SCHEMACLASS,
         SPECPROP_POLICYTYPE      = PROP_POLICYTYPE,
         SPECPROP_PAGING          = PROP_PAGING,
+        SPECPROP_HOST            = PROP_HOST,
 
         SPECPROP_MAXQUEUESIZELOWERLIMIT,
         SPECPROP_MAXQUEUESIZEUPPERLIMIT,
@@ -121,30 +125,34 @@ namespace acl {
         SPECPROP_MAXPAGESLOWERLIMIT,
         SPECPROP_MAXPAGESUPPERLIMIT,
         SPECPROP_MAXPAGEFACTORLOWERLIMIT,
-        SPECPROP_MAXPAGEFACTORUPPERLIMIT };
+        SPECPROP_MAXPAGEFACTORUPPERLIMIT,
+        SPECPROPSIZE              // SPECPROPSIZE must be last
+    };
 
 // AclResult  shared between ACL spec and ACL authorise interface
     enum AclResult {
         ALLOW,
         ALLOWLOG,
         DENY,
-        DENYLOG };
+        DENYLOG,
+        RESULTSIZE
+    };
 
 
-    class AclHelper {
+    QPID_BROKER_CLASS_EXTERN class AclHelper {
     private:
         AclHelper(){}
     public:
-        static ObjectType getObjectType(const std::string& str);
-        static std::string getObjectTypeStr(const ObjectType o);
-        static Action getAction(const std::string& str);
-        static std::string getActionStr(const Action a);
-        static Property getProperty(const std::string& str);
-        static std::string getPropertyStr(const Property p);
-        static SpecProperty getSpecProperty(const std::string& str);
-        static std::string getPropertyStr(const SpecProperty p);
-        static AclResult getAclResult(const std::string& str);
-        static std::string getAclResultStr(const AclResult r);
+        static QPID_BROKER_EXTERN ObjectType            getObjectType(const std::string& str);
+        static QPID_BROKER_EXTERN const std::string& getObjectTypeStr(const ObjectType o);
+        static QPID_BROKER_EXTERN Action                    getAction(const std::string& str);
+        static QPID_BROKER_EXTERN const std::string&     getActionStr(const Action a);
+        static QPID_BROKER_EXTERN Property                getProperty(const std::string& str);
+        static QPID_BROKER_EXTERN const std::string&   getPropertyStr(const Property p);
+        static QPID_BROKER_EXTERN SpecProperty        getSpecProperty(const std::string& str);
+        static QPID_BROKER_EXTERN const std::string&   getPropertyStr(const SpecProperty p);
+        static QPID_BROKER_EXTERN AclResult              getAclResult(const std::string& str);
+        static QPID_BROKER_EXTERN const std::string&  getAclResultStr(const AclResult r);
 
         typedef std::set<Property>                  propSet;
         typedef boost::shared_ptr<propSet>          propSetPtr;
@@ -159,10 +167,6 @@ namespace acl {
         typedef propMap::const_iterator             propMapItr;
         typedef std::map<SpecProperty, std::string> specPropMap;
         typedef specPropMap::const_iterator         specPropMapItr;
-
-        // This map contains the legal combinations of object/action/properties
-        // found in an ACL file
-        static void loadValidationMap(objectMapPtr& map);
 
         //
         // properyMapToString

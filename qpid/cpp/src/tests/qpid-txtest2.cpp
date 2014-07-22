@@ -61,12 +61,13 @@ struct Options : public qpid::Options {
     std::string url;
     std::string connectionOptions;
     qpid::log::Options log;
+    uint port;
     bool quiet;
 
     Options() : help(false), init(true), transfer(true), check(true),
                 size(256), durable(true), queues(2),
                 base("tx-test2"), msgsPerTx(1), txCount(5), totalMsgCount(10),
-                capacity(1000), url("localhost"), quiet(false)
+                capacity(1000), url("localhost"), port(0), quiet(false)
     {
         addOptions()
             ("init", qpid::optValue(init, "yes|no"), "Declare queues and populate one with the initial set of messages.")
@@ -82,22 +83,38 @@ struct Options : public qpid::Options {
             ("capacity", qpid::optValue(capacity, "N"), "Pre-fetch window (0 implies no pre-fetch)")
             ("broker,b", qpid::optValue(url, "URL"), "url of broker to connect to")
             ("connection-options", qpid::optValue(connectionOptions, "OPTIONS"), "options for the connection")
+            ("port,p", qpid::optValue(port, "PORT"), "(for test compatibility only, use broker option instead)")
             ("quiet", qpid::optValue(quiet), "reduce output from test")
             ("help", qpid::optValue(help), "print this usage statement");
         add(log);
     }
+
     bool parse(int argc, char** argv)
     {
         try {
             qpid::Options::parse(argc, argv);
+            if (port) {
+                if (url == "localhost") {
+                    std::stringstream u;
+                    u << url << ":" << port;
+                    url = u.str();
+                } else {
+                    std::cerr << *this << std::endl << std::endl
+                              << "--port and --broker should not be specified together; specify full url in --broker option" << std::endl;
+                    return false;
+                }
+
+            }
             qpid::log::Logger::instance().configure(log);
             if (help) {
                 std::cout << *this << std::endl << std::endl
                           << "Transactionally moves messages between queues" << std::endl;
                 return false;
-            } else {
-                return true;
             }
+            if (totalMsgCount < msgsPerTx) {
+                totalMsgCount = msgsPerTx; // Must have at least msgsPerTx total messages.
+            }
+            return true;
         } catch (const std::exception& e) {
             std::cerr << *this << std::endl << std::endl << e.what() << std::endl;
             return false;
@@ -144,6 +161,7 @@ struct Client
     virtual ~Client()
     {
         try {
+            session.sync();
             session.close();
             connection.close();
         } catch(const std::exception& e) {
@@ -163,32 +181,44 @@ struct Transfer : public TransactionalClient, public Runnable
     const std::string target;
     const std::string source;
     Thread thread;
+    bool failed;
 
-    Transfer(const std::string& to, const std::string& from, const Options& opts) : TransactionalClient(opts), target(to), source(from) {}
+    Transfer(const std::string& to, const std::string& from, const Options& opts) : TransactionalClient(opts), target(to), source(from), failed(false) {}
 
     void run()
     {
         try {
+
             Sender sender(session.createSender(target));
             Receiver receiver(session.createReceiver(source));
             receiver.setCapacity(opts.capacity);
-            for (uint t = 0; t < opts.txCount; t++) {
-                for (uint m = 0; m < opts.msgsPerTx; m++) {
-                    Message msg = receiver.fetch(Duration::SECOND*30);
-                    if (msg.getContentSize() != opts.size) {
-                        std::ostringstream oss;
-                        oss << "Message size incorrect: size=" << msg.getContentSize() << "; expected " << opts.size;
-                        throw std::runtime_error(oss.str());
+            for (uint t = 0; t < opts.txCount;) {
+                try {
+                    for (uint m = 0; m < opts.msgsPerTx; m++) {
+                        Message msg = receiver.fetch(Duration::SECOND*30);
+                        if (msg.getContentSize() != opts.size) {
+                            std::ostringstream oss;
+                            oss << "Message size incorrect: size=" << msg.getContentSize() << "; expected " << opts.size;
+                            throw std::runtime_error(oss.str());
+                        }
+                        sender.send(msg);
                     }
-                    sender.send(msg);
+                    session.commit();
+                    t++;
+                    if (!opts.quiet && t % 10 == 0) std::cout << "Transaction " << t << " of " << opts.txCount << " committed successfully" << std::endl;
+                } catch (const TransactionAborted&) {
+                    std::cout << "Transaction " << (t+1) << " of " << opts.txCount << " was aborted and will be retried" << std::endl;
+                    session = connection.createTransactionalSession();
+                    sender = session.createSender(target);
+                    receiver = session.createReceiver(source);
+                    receiver.setCapacity(opts.capacity);
                 }
-                QPID_LOG(info, "Moved " << opts.msgsPerTx << " from " << source << " to " << target);
-                session.commit();
             }
             sender.close();
             receiver.close();
         } catch(const std::exception& e) {
-            std::cout << "Transfer interrupted: " << e.what() << std::endl;
+            failed = true;
+            QPID_LOG(error,  "Transfer " << source << " to " << target << " interrupted: " << e.what());
         }
     }
 };
@@ -240,9 +270,11 @@ struct Controller : public Client
             agents.back().thread = Thread(agents.back());
         }
 
-        for (boost::ptr_vector<Transfer>::iterator i = agents.begin(); i != agents.end(); i++) {
+        for (boost::ptr_vector<Transfer>::iterator i = agents.begin(); i != agents.end(); i++)
             i->thread.join();
-        }
+        for (boost::ptr_vector<Transfer>::iterator i = agents.begin(); i != agents.end(); i++)
+            if (i->failed)
+                throw std::runtime_error("Transfer agents failed");
     }
 
     int check()
@@ -258,10 +290,10 @@ struct Controller : public Client
                 drained.push_back(msg.getCorrelationId());
                 ++count;
             }
+            session.acknowledge();
             receiver.close();
             if (!opts.quiet) std::cout << "Drained " << count << " messages from " << *i << std::endl;
         }
-
         sort(ids.begin(), ids.end());
         sort(drained.begin(), drained.end());
 

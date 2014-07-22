@@ -69,8 +69,12 @@ void SessionState::addManagementObject() {
     if (parent != 0) {
         ManagementAgent* agent = getBroker().getManagementAgent();
         if (agent != 0) {
-            mgmtObject = _qmf::Session::shared_ptr(new _qmf::Session
-                (agent, this, parent, getId().getName()));
+            std::string name(getId().getName());
+            std::string fullName(name);
+            if (name.length() >= std::numeric_limits<uint8_t>::max())
+                name.resize(std::numeric_limits<uint8_t>::max()-1);
+            mgmtObject = _qmf::Session::shared_ptr(new _qmf::Session                           (agent, this, parent, name));
+            mgmtObject->set_fullName (fullName);
             mgmtObject->set_attached (0);
             mgmtObject->set_detachedLifespan (0);
             mgmtObject->clr_expireTime();
@@ -225,8 +229,9 @@ void SessionState::handleContent(AMQFrame& frame)
 
         IncompleteIngressMsgXfer xfer(this, msg);
         msg->getIngressCompletion().begin();
-        semanticState.route(deliverable.getMessage(), deliverable);
+        // This call should come before routing, because it calcs required credit.
         msgBuilder.end();
+        semanticState.route(deliverable.getMessage(), deliverable);
         msg->getIngressCompletion().end(xfer);  // allows msg to complete xfer
     }
 }

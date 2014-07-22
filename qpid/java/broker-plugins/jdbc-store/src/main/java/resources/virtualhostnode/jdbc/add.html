@@ -20,36 +20,63 @@
  -->
 <div>
     <div style="clear:both">
-      <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Virtual Host Node Name*:</div>
+      <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Name*:</div>
       <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
-          <input type="text" id="addVirtualHostNode.jdbcNodeName"
+          <input type="text" id="addVirtualHostNode.name"
                           data-dojo-type="dijit/form/ValidationTextBox"
                           data-dojo-props="
                               name: 'name',
-                              placeHolder: 'node name',
+                              placeHolder: 'virtual host node name',
                               required: true,
-                              missingMessage: 'A node name must be supplied',
-                              title: 'Enter node name',
+                              missingMessage: 'A virtual host node name must be supplied',
+                              title: 'Enter virtual host node name',
                               pattern: '^[\x20-\x2e\x30-\x7F]{1,255}$'" />
       </div>
     </div>
     <div style="clear:both">
       <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">JDBC Url*:</div>
       <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
-          <input type="text" id="addVirtualHostNode.jdbcConnectionUrl"
+          <input type="text" id="addVirtualHostNode.connectionUrl"
                           data-dojo-type="dijit/form/ValidationTextBox"
                           data-dojo-props="
                               name: 'connectionUrl',
                               placeHolder: 'jdbc:provider:info',
                               required: true,
                               missingMessage: 'JDBC URL must be supplied',
-                              title: 'Enter JDBC URL'" />
+                              title: 'Enter JDBC URL',
+                              pattern: '^jdbc:.*:.*$'"/>
       </div>
+    </div>
+    <div style="clear:both">
+        <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Username*:</div>
+        <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
+            <input type="text" id="addVirtualHostNode.username"
+                   data-dojo-type="dijit/form/ValidationTextBox"
+                   data-dojo-props="
+                              name: 'username',
+                              placeHolder: 'username',
+                              required: true,
+                              missingMessage: 'Username must be supplied',
+                              title: 'Enter username'" />
+        </div>
+    </div>
+    <div style="clear:both">
+        <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Password*:</div>
+        <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
+            <input type="password" id="addVirtualHostNode.password"
+                   data-dojo-type="dijit/form/ValidationTextBox"
+                   data-dojo-props="
+                              name: 'password',
+                              placeHolder: 'password',
+                              required: true,
+                              missingMessage: 'Password must be supplied',
+                              title: 'Enter password'" />
+        </div>
     </div>
     <div style="clear:both">
       <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Connection Pool*:</div>
       <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
-          <input type="text" id="addVirtualHostNode.jdbcConnectionPoolType"
+          <input type="text" id="addVirtualHostNode.connectionPoolType"
                           data-dojo-type="dijit/form/FilteringSelect"
                           data-dojo-props="
                               name: 'connectionPoolType',
@@ -59,17 +86,7 @@
                               placeHolder: 'Select pool type'" />
       </div>
     </div>
-    <div style="clear:both;display:none">
-      <div class="formLabel-labelCell tableContainer-labelCell" style="float:left; width: 300px;">Combined store:</div>
-      <div class="formLabel-controlCell tableContainer-valueCell" style="float:left;">
-          <input type="text" id="addVirtualHostNode.derbyMessageStoreProvider"
-                          data-dojo-type="dijit/form/CheckBox"
-                          data-dojo-props="
-                              name: 'messageStoreProvider',
-                              required: true,
-                              checked: true" />
-      </div>
-    </div>
+
     <div style="clear:both"></div>
-    <div id="addVirtualHost.poolSpecificDiv"></div>
+    <div id="addVirtualHostNode.poolSpecificDiv"></div>
 </div>

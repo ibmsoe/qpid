@@ -47,10 +47,10 @@ define(["dojo/_base/xhr",
                 poolTypesData[i]= {id: poolTypes[i], name: poolTypes[i]};
             }
             var poolTypesStore = new Memory({ data: poolTypesData });
-            var poolTypeControl = registry.byId("addVirtualHostNode.jdbcConnectionPoolType");
+            var poolTypeControl = registry.byId("addVirtualHostNode.connectionPoolType");
             poolTypeControl.set("store", poolTypesStore);
 
-            var poolTypeFieldsDiv = dom.byId("addVirtualHost.poolSpecificDiv");
+            var poolTypeFieldsDiv = dom.byId("addVirtualHostNode.poolSpecificDiv");
             poolTypeControl.on("change",
                     function(type)
                     {
@@ -59,10 +59,10 @@ define(["dojo/_base/xhr",
                           var widgets = registry.findWidgets(poolTypeFieldsDiv);
                           array.forEach(widgets, function(item) { item.destroyRecursive();});
                           domConstruct.empty(poolTypeFieldsDiv);
-                          require(["qpid/management/virtualhost/store/pool/"+type.toLowerCase()+"/add"],
+                          require(["qpid/management/store/pool/"+type.toLowerCase()+"/add"],
                           function(poolType)
                           {
-                              poolType.show();
+                              poolType.show("addVirtualHostNode.poolSpecificDiv", "formAddVirtualHostNode.qpid.jdbcstore.bonecp", "virtualhostnode/store/pool/" + type.toLowerCase() + "/add.html");
                           });
                       }
                     }
